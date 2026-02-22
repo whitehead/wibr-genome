@@ -1,0 +1,129 @@
+"""
+Snakemake workflow: demux (runbcl2fastq) -> [AVITI flatten FASTQ] -> PreProcess-SLURM -> PreProcess-Summary -> getQCinfo -> email.
+
+Usage (Snakemake requires --cores; use 1 since real work runs in SLURM):
+  snakemake all -s Snakefile --cores 1 --config runfolder=/path/to/runfolder
+  snakemake all -s Snakefile --cores 1 --config runfolder=/path/to/runfolder partition=solexa
+
+Config: runfolder (required); partition (optional, default: solexa) for SLURM --partition.
+"""
+import os
+
+WORKFLOW_DIR = os.path.dirname(os.path.abspath(workflow.snakefile))
+SCRIPTS = os.path.join(WORKFLOW_DIR, "scripts")
+RUNFOLDER = config.get("runfolder")
+if not RUNFOLDER:
+    raise ValueError("Set runfolder via --config runfolder=/path/to/runfolder")
+RUNFOLDER = os.path.abspath(RUNFOLDER)
+PARTITION = str(config.get("partition", "solexa"))
+
+# Sentinel files live inside the runfolder
+def sentinel(name):
+    return os.path.join(RUNFOLDER, f".snakemake_{name}.done")
+
+
+def is_aviti():
+    import sys
+    sys.path.insert(0, SCRIPTS)
+    from runfolder_resolve import _sequencer_type
+    return _sequencer_type(RUNFOLDER) == "aviti"
+
+
+rule all:
+    input: sentinel("email")
+
+
+rule demux:
+    """Submit demux SLURM jobs (runbcl2fastq) and wait until they finish."""
+    output: s = sentinel("demux")
+    run:
+        import subprocess
+        subprocess.run(
+            ["python3", os.path.join(SCRIPTS, "runbcl2fastq.py"), "--wait", "--partition", PARTITION, RUNFOLDER],
+            cwd=SCRIPTS,
+            check=True,
+        )
+        with open(output.s, "w"):
+            pass
+
+
+rule aviti_flatten_fastq:
+    """If AVITI, move *fastq.gz from subdirs into FASTQ/; else no-op."""
+    input: sentinel("demux")
+    output: s = sentinel("aviti_flatten")
+    run:
+        if is_aviti():
+            fastq_dir = os.path.join(RUNFOLDER, "FASTQ")
+            import subprocess
+            subprocess.run(
+                ["bash", "-c",
+                 f'for file in $(find "{fastq_dir}" -name "*fastq.gz" -type f); do mv "$file" "{fastq_dir}/"; done'],
+                check=True,
+            )
+        with open(output.s, "w"):
+            pass
+
+
+rule preprocess_slurm:
+    """Run PreProcess-SLURM.sh (submits fastqc/fastq_screen jobs) and wait for completion."""
+    input: sentinel("aviti_flatten")
+    output: s = sentinel("preprocess_slurm")
+    run:
+        import subprocess
+        subprocess.run(
+            ["python3", os.path.join(SCRIPTS, "run_preprocess_slurm_wait.py"), "--partition", PARTITION, RUNFOLDER],
+            cwd=SCRIPTS,
+            check=True,
+        )
+        with open(output.s, "w"):
+            pass
+
+
+rule preprocess_summary:
+    """Run PreProcess-Summary.sh to generate multiqc summaries."""
+    input: sentinel("preprocess_slurm")
+    output: s = sentinel("preprocess_summary")
+    run:
+        import subprocess
+        subprocess.run(
+            ["bash", os.path.join(SCRIPTS, "PreProcess-Summary.sh"), "-r", RUNFOLDER],
+            check=True,
+        )
+        with open(output.s, "w"):
+            pass
+
+
+rule getqcinfo:
+    """Update QC info in database (getQCinfo_by_runfolder.py with run=1)."""
+    input: sentinel("preprocess_summary")
+    output: s = sentinel("getqcinfo")
+    run:
+        import subprocess
+        # run=1 to perform DB updates
+        subprocess.run(
+            ["python3", os.path.join(SCRIPTS, "getQCinfo_by_runfolder.py"), RUNFOLDER, "1"],
+            cwd=SCRIPTS,
+            check=True,
+        )
+        with open(output.s, "w"):
+            pass
+
+
+rule email_done:
+    """Email notification that the run is complete."""
+    input: sentinel("getqcinfo")
+    output: s = sentinel("email")
+    run:
+        import subprocess
+        subject = f"Demux run complete: {RUNFOLDER}"
+        body = f"Run folder {RUNFOLDER} has completed demux, PreProcess, and QC update."
+        r = subprocess.run(
+            ["mail", "-s", subject, "sgupta@wi.mit.edu"],
+            input=body,
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0:
+            print("Note: mail command failed (install mail or configure sendmail). Run complete.")
+        with open(output.s, "w"):
+            pass

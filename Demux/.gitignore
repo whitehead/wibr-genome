@@ -1,0 +1,47 @@
+# Snakemake
+.snakemake/
+*.done
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+.env
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Logs and SLURM
+*.log
+*.out
+*.err
+
+# Runfolder / data (paths often configured externally)
+# Uncomment if you keep runfolder paths in config:
+# runfolder/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config (if scripts/config or db_config hold secrets)
+scripts/config
+scripts/*_config.py
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
