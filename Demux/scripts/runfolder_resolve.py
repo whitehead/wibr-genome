@@ -4,6 +4,7 @@ Derives RUNFOLDER for DB lookup from a data directory (localdir / htdatafolder).
 
 Supported sequencers (directory name must contain one):
   - _A01100_  : NovaSeq; RunParameters.xml <side>; runfolder date_WIGTC-NOVASEQ1A/B_flowcellid
+  - _SH01116_ : MiSeq; runfolder YYMMDD_WIGTC-MISEQ_flowcellid (flowcell id from folder name)
   - _AV240904_: AVITI; RunParameters.json (FlowcellID, side sideA/sideB, Date); runfolder YYMMDD_WIGTC-AVITI1A/B_flowcellid
 Otherwise exits with "sequencer not compatible".
 """
@@ -18,23 +19,28 @@ RUN_PARAMETERS_XML = "RunParameters.xml"
 RUN_PARAMETERS_JSON = "RunParameters.json"
 
 NOVASEQ_MARKER = "_A01100_"
+MISEQ_MARKER = "_SH01116_"
 AVITI_MARKER = "_AV240904_"
 
 
 def _sequencer_type(localdir):
-    """Return 'novaseq', 'aviti', or None if localdir basename is not compatible."""
+    """Return 'novaseq', 'miseq', 'aviti', or None if localdir basename is not compatible."""
     basename = os.path.basename(os.path.abspath(localdir.rstrip(os.sep)))
     if NOVASEQ_MARKER in basename:
         return "novaseq"
+    if MISEQ_MARKER in basename:
+        return "miseq"
     if AVITI_MARKER in basename:
         return "aviti"
     return None
 
 
-def get_flowcell_side(localdir):
+def get_flowcell_side(localdir, required=True):
     """
     Read RunParameters.xml in localdir and return flowcell side 'A' or 'B'.
-    Exits with error if file is missing or <side> not found.
+    Exits with error if file is missing.
+    If required is True, exits when <side> is not found.
+    If required is False, returns None when <side> is not found.
     """
     path = Path(localdir) / RUN_PARAMETERS_XML
     if not path.is_file():
@@ -52,8 +58,10 @@ def get_flowcell_side(localdir):
             side = elem.text.strip().upper()
             if side in ("A", "B"):
                 return side
-    print(f"Error: Could not find <side>A</side> or <side>B</side> in {path}", file=sys.stderr)
-    sys.exit(1)
+    if required:
+        print(f"Error: Could not find <side>A</side> or <side>B</side> in {path}", file=sys.stderr)
+        sys.exit(1)
+    return None
 
 
 def _date_to_yymmdd(date_str):
@@ -130,8 +138,9 @@ def resolve_runfolder(localdir, runfolder_arg=None):
     """
     Return runfolder for DB lookup. If runfolder_arg is given, use it.
     Otherwise derive from localdir:
-    - localdir name must contain _A01100_ (NovaSeq) or _AV240904_ (AVITI); else exit "sequencer not compatible".
+    - localdir name must contain _A01100_ (NovaSeq), _SH01116_ (MiSeq), or _AV240904_ (AVITI); else exit "sequencer not compatible".
     - NovaSeq: RunParameters.xml <side>; format date_WIGTC-NOVASEQ1A/B_flowcellid.
+    - MiSeq: format YYMMDD_WIGTC-MISEQ_flowcellid from folder name.
     - AVITI: RunParameters.json (FlowcellID, side, Date); format YYMMDD_WIGTC-AVITI1A/B_flowcellid.
     """
     if runfolder_arg is not None and runfolder_arg != "":
@@ -139,16 +148,26 @@ def resolve_runfolder(localdir, runfolder_arg=None):
     seq_type = _sequencer_type(localdir)
     if seq_type is None:
         print(
-            "Error: Sequencer not compatible. localdir name must contain _A01100_ (NovaSeq) or _AV240904_ (AVITI).",
+            "Error: Sequencer not compatible. localdir name must contain _A01100_ (NovaSeq), _SH01116_ (MiSeq), or _AV240904_ (AVITI).",
             file=sys.stderr,
         )
         sys.exit(1)
     if seq_type == "aviti":
         return get_aviti_runfolder(localdir)
-    # NovaSeq
-    side = get_flowcell_side(localdir)
     basename = os.path.basename(os.path.abspath(localdir.rstrip(os.sep)))
     parts = basename.split("_")
+    if seq_type == "miseq":
+        # Expected folder like YYYYMMDD_SH01116_0015_ASC2150588-SC3 -> 260505_WIGTC-MISEQ_ASC2150588
+        if len(parts) >= 4:
+            try:
+                yymmdd = datetime.strptime(parts[0], "%Y%m%d").strftime("%y%m%d")
+            except ValueError:
+                yymmdd = parts[0]
+            flowcell = parts[3].split("-")[0]
+            return f"{yymmdd}_WIGTC-MISEQ_{flowcell}"
+        return basename
+    # NovaSeq
+    side = get_flowcell_side(localdir, required=True)
     if len(parts) >= 4:
         sequencer = "WIGTC-NOVASEQ1A" if side == "A" else "WIGTC-NOVASEQ1B"
         return f"{parts[0]}_{sequencer}_{'_'.join(parts[3:])}"

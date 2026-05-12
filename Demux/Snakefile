@@ -2,10 +2,10 @@
 Snakemake workflow: demux (runbcl2fastq) -> [AVITI flatten FASTQ] -> PreProcess-SLURM -> PreProcess-Summary -> getQCinfo -> email.
 
 Usage (Snakemake requires --cores; use 1 since real work runs in SLURM):
-  snakemake all -s Snakefile --cores 1 --config runfolder=/path/to/runfolder
-  snakemake all -s Snakefile --cores 1 --config runfolder=/path/to/runfolder partition=solexa
+  snakemake all -s Snakefile --cores 1 --config runfolder=/path/to/runfolder email=you@example.org
+  snakemake all -s Snakefile --cores 1 --config runfolder=/path/to/runfolder email=you@example.org partition=solexa
 
-Config: runfolder (required); partition (optional, default: solexa) for SLURM --partition.
+Config: runfolder (required); email (required) for completion notification; partition (optional, default: solexa) for SLURM --partition.
 """
 import os
 
@@ -15,6 +15,9 @@ RUNFOLDER = config.get("runfolder")
 if not RUNFOLDER:
     raise ValueError("Set runfolder via --config runfolder=/path/to/runfolder")
 RUNFOLDER = os.path.abspath(RUNFOLDER)
+EMAIL_TO = config.get("email")
+if not EMAIL_TO:
+    raise ValueError("Set email via --config email=you@example.org")
 PARTITION = str(config.get("partition", "solexa"))
 
 # Sentinel files live inside the runfolder
@@ -34,7 +37,7 @@ rule all:
 
 
 rule demux:
-    """Submit demux SLURM jobs (runbcl2fastq) and wait until they finish."""
+    """Submit demux SLURM jobs (NovaSeq/MiSeq bcl2fastq or AVITI bases2fastq) and wait until they finish."""
     output: s = sentinel("demux")
     run:
         import subprocess
@@ -118,7 +121,7 @@ rule email_done:
         subject = f"Demux run complete: {RUNFOLDER}"
         body = f"Run folder {RUNFOLDER} has completed demux, PreProcess, and QC update."
         r = subprocess.run(
-            ["mail", "-s", subject, "sgupta@wi.mit.edu"],
+            ["mail", "-s", subject, EMAIL_TO],
             input=body,
             capture_output=True,
             text=True,

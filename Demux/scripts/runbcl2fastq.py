@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Submit SLURM jobs to demux Illumina (NovaSeq) or AVITI run folders.
-NovaSeq: bcl2fastq, one job per lane.
+Submit SLURM jobs to demux Illumina (NovaSeq/MiSeq) or AVITI run folders.
+NovaSeq/MiSeq: bcl2fastq, one job per lane.
 AVITI: bases2fastq, single job (runfolder name must contain _AV240904_).
 Use --wait to block until all submitted jobs have finished.
 """
@@ -47,11 +47,13 @@ def _wait_for_job_ids(job_ids):
 
 def run_novaseq(runfolder_dir, lanes, wait=False, partition="solexa"):
     """Submit one bcl2fastq job per lane (NovaSeq). Return list of job IDs."""
+    runfolder_dir = os.path.abspath(runfolder_dir)
+    sample_sheet = os.path.join(runfolder_dir, "samplesheet.csv")
     base_command = (
         f"sbatch --mem=64gb --cpus-per-task=20 --partition={partition} {SBATCH_IO} "
         '--wrap "bcl2fastq --runfolder-dir={runfolder_dir} '
         '--output-dir={runfolder_dir} '
-        '--sample-sheet=./samplesheet.csv '
+        '--sample-sheet={sample_sheet} '
         '--tiles s_{lane} '
         '--reports-dir={runfolder_dir}/Lane{lane}Reports/ '
         '--stats-dir={runfolder_dir}/Lane{lane}Stats/ '
@@ -59,7 +61,9 @@ def run_novaseq(runfolder_dir, lanes, wait=False, partition="solexa"):
     )
     job_ids = []
     for lane in lanes:
-        command = base_command.format(runfolder_dir=runfolder_dir, lane=lane)
+        command = base_command.format(
+            runfolder_dir=runfolder_dir, lane=lane, sample_sheet=sample_sheet
+        )
         print(f"Executing: {command}")
         jid, err = _submit_and_capture_job_id(command)
         if err is not None:
@@ -116,7 +120,7 @@ def main():
         print("Usage: runbcl2fastq.py [--wait] [--partition PARTITION] <runfolder_dir> [lane1 lane2 ...]")
         print("  --wait: wait until all submitted SLURM jobs finish before exiting")
         print("  --partition: SLURM partition (default: solexa)")
-        print("  NovaSeq (_A01100_): one bcl2fastq job per lane; defaults to lanes 1 2 3 4 if not given.")
+        print("  NovaSeq/MiSeq (_A01100_/_SH01116_): one bcl2fastq job per lane; defaults to lanes 1 2 3 4 if not given.")
         print("  AVITI (_AV240904_): single bases2fastq job; no lane args.")
         sys.exit(1)
 
@@ -128,12 +132,12 @@ def main():
     seq_type = _sequencer_type(runfolder_dir)
     if seq_type == "aviti":
         run_aviti(runfolder_dir, wait=wait, partition=partition)
-    elif seq_type == "novaseq":
+    elif seq_type in ("novaseq", "miseq"):
         lanes = args[1:] if len(args) > 1 else list(DEFAULT_NOVASEQ_LANES)
         run_novaseq(runfolder_dir, lanes, wait=wait, partition=partition)
     else:
         print(
-            "Error: Sequencer not supported. Run folder name must contain _A01100_ (NovaSeq) or _AV240904_ (AVITI).",
+            "Error: Sequencer not supported. Run folder name must contain _A01100_ (NovaSeq), _SH01116_ (MiSeq), or _AV240904_ (AVITI).",
             file=sys.stderr,
         )
         sys.exit(1)

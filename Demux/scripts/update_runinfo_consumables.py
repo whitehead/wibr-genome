@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Update RUNINFO consumable fields (FCID, SEQKITLOT20, SEQKITLOT4, CLUSTERKITLOT, RUNFOLDER)
-from RunParameters.xml (NovaSeq) or RunParameters.json (AVITI).
+from RunParameters.xml (NovaSeq/MiSeq) or RunParameters.json (AVITI).
 RUNFOLDER is set to YYMMDD_sequencer_flowcellid (e.g. 260122_WIGTC-NOVASEQ1A_AHF2Y3DSXF).
 
 Finds runindex from localdir (same runfolder resolution as getQCinfo_by_runfolder).
@@ -9,7 +9,7 @@ Only updates if SEQDATE for that run is within the last 3 weeks; otherwise skips
 
 Usage:
   update_runinfo_consumables.py
-      With no arguments: scan /lab/htdata/ (subfolders with A01100) and
+      With no arguments: scan /lab/htdata/ (subfolders with A01100 or SH01116) and
       /lab/htdata/AV240904/ (subfolders with AV240904); update each if runfolder
       exists in DB and SEQDATE within 3 weeks. Report "run folder not found" and
       continue when a runfolder is missing.
@@ -36,6 +36,7 @@ from runfolder_resolve import (
 HTDATA_ROOT = "/lab/htdata"
 AV240904_DIR = "/lab/htdata/AV240904"
 NOVASEQ_SUBSTRING = "A01100"
+MISEQ_SUBSTRING = "SH01116"
 AVITI_SUBSTRING = "AV240904"
 
 
@@ -73,7 +74,7 @@ def _collect_batch_localdirs():
     localdirs = []
     if os.path.isdir(HTDATA_ROOT):
         for name in os.listdir(HTDATA_ROOT):
-            if NOVASEQ_SUBSTRING not in name:
+            if NOVASEQ_SUBSTRING not in name and MISEQ_SUBSTRING not in name:
                 continue
             path = os.path.join(HTDATA_ROOT, name)
             if os.path.isdir(path):
